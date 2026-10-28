@@ -1,0 +1,28 @@
+# My settings for running Robot Shop on the Capstone 1 EKS cluster
+# (Uga-vote-cluster, eu-north-1). Used together with the chart's own values.yaml:
+#
+#   helm upgrade --install robot-shop K8s/helm -n robot-shop -f K8s/helm/values-eks.yaml
+#
+# (scripts/deploy-shop.sh runs exactly that.)
+
+image:
+  repo: robotshop
+  # pinned to the release in .env instead of "latest", so every install
+  # (and the incident drill) runs the same code
+  version: 2.1.0
+  pullPolicy: IfNotPresent
+
+# EKS gives the web Service a public AWS load balancer
+nodeport: false
+
+redis:
+  # the chart defaults to "standard", which EKS doesn't have; empty uses the
+  # cluster's default class (encrypted gp3, from k8s/cluster-setup.yaml in
+  # the example-voting-app repo)
+  storageClassName: ""
+
+# steady simulated traffic for the dashboards, logs, traces and SLO
+load:
+  enabled: true
+  clients: 5
+  errors: true
