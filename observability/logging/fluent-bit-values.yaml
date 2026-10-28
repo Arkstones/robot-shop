@@ -1,0 +1,80 @@
+# My settings for Fluent Bit (chart fluent/fluent-bit 0.58.3, Fluent Bit 5.1).
+# Installed by scripts/install-logging.sh.
+#
+# Fluent Bit runs one pod on every node (a DaemonSet). Each pod reads the log
+# files Kubernetes writes for the containers on its node, adds the pod's
+# Kubernetes details, works out service and level (shape-log.lua), and sends
+# the lines to Loki.
+#
+# shape-log.lua is not pasted in here: install-logging.sh passes it with
+#   --set-file luaScripts.shape-log\.lua=observability/logging/shape-log.lua
+# so it stays a normal file I can read and test.
+
+kind: DaemonSet
+
+# the chart's "helm test" pod isn't needed
+testFramework:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 48Mi
+  limits:
+    memory: 128Mi
+
+# let Prometheus scrape Fluent Bit's own numbers (lines in, lines sent, retries)
+serviceMonitor:
+  enabled: true
+
+config:
+  inputs: |
+    [INPUT]
+        Name              tail
+        Tag               kube.*
+        Path              /var/log/containers/*.log
+        # my own logs would loop: Fluent Bit logging that it sent its logs
+        Exclude_Path      /var/log/containers/fluent-bit-*_logging_*.log
+        multiline.parser  cri
+        # remember how far each file was read, so a restart doesn't resend
+        DB                /var/log/fluent-bit-kube.db
+        Mem_Buf_Limit     10MB
+        Skip_Long_Lines   On
+        Refresh_Interval  10
+
+  filters: |
+    # add namespace, pod, container and pod labels to each line
+    [FILTER]
+        Name                kubernetes
+        Match               kube.*
+        # keep the line exactly as the app wrote it (shape-log.lua reads it)
+        Merge_Log           Off
+        Labels              On
+        Annotations         Off
+        # a pod can opt out with the annotation fluentbit.io/exclude: "true"
+        K8S-Logging.Exclude On
+
+    # namespace/service/container/level/pod, see shape-log.lua
+    [FILTER]
+        Name    lua
+        Match   kube.*
+        script  /fluent-bit/scripts/shape-log.lua
+        call    shape
+
+  outputs: |
+    [OUTPUT]
+        Name                 loki
+        Match                kube.*
+        Host                 loki.logging.svc.cluster.local
+        Port                 3100
+        # Loki labels: the few things I filter on. Fluent Bit removes these
+        # keys from the line itself.
+        Labels               job=fluent-bit, namespace=$namespace, service=$service, container=$container, level=$level
+        # pod names change on every restart, so they go in as structured
+        # metadata (searchable with | pod="...") rather than as a label
+        Structured_Metadata  pod=$pod
+        Remove_Keys          pod
+        # all that is left is "log": send it as the plain original line
+        Drop_Single_Key      raw
+        Line_Format          json
+        Retry_Limit          10

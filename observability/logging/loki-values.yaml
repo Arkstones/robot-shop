@@ -1,0 +1,81 @@
+# My settings for Loki (community chart grafana-community/loki 20.0.2,
+# Loki 3.7). Installed by scripts/install-logging.sh.
+#
+# Loki stores the logs; Fluent Bit (fluent-bit-values.yaml) collects them from
+# every node and sends them here; Grafana searches them.
+#
+# One Loki pod ("Monolithic" mode) keeping logs on its own EBS disk. That is
+# plenty for one small shop on a 3-node course cluster. A real production setup
+# would run several pods and keep the logs in S3 instead.
+
+deploymentMode: Monolithic
+
+loki:
+  # one shop, one team: no multi-tenant login in front of Loki
+  auth_enabled: false
+
+  commonConfig:
+    replication_factor: 1      # only one copy (only one Loki pod)
+
+  storage:
+    type: filesystem           # the pod's EBS disk, not S3
+
+  schemaConfig:
+    configs:
+      - from: "2026-10-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+  # keep logs for 7 days, the same as Prometheus keeps metrics
+  limits_config:
+    retention_period: 168h
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+    volume_enabled: true
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  persistence:
+    size: 5Gi
+    # delete the disk when Loki is uninstalled, so no EBS volume is left
+    # behind (and billed) after the course
+    enableStatefulSetAutoDeletePVC: true
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+  extraEnv:
+    # tell Go to clean up memory before it hits the limit above
+    - name: GOMEMLIMIT
+      value: 650MiB
+
+# The chart defaults to a bigger setup. Switch off what one small Loki
+# doesn't need. The two memcached caches alone ask for about 9 GB of memory,
+# more than a whole node has.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+gateway:
+  enabled: false     # Grafana and Fluent Bit talk to Loki directly
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+
+# zero replicas for the "scalable" and "distributed" modes
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
