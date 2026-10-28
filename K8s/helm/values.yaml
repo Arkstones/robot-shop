@@ -54,7 +54,11 @@ shipping: {}
 
 user: {}
 
-web: {}
+web:
+  # request/error/latency metrics from the nginx access log, see templates/web-metrics.yaml
+  metrics:
+    enabled: false
+    exporterImage: ghcr.io/martin-helmich/prometheus-nginxlog-exporter/exporter:v1.11.0
 
 # load generator (simulated shoppers), see templates/load-deployment.yaml
 load:

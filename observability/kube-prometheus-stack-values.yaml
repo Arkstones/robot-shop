@@ -1,0 +1,126 @@
+# My settings for kube-prometheus-stack (chart version 92.14.1) on
+# Uga-vote-cluster. Installed by scripts/install-monitoring.sh:
+#
+#   helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+#     --version 92.14.1 -n monitoring -f observability/kube-prometheus-stack-values.yaml
+#
+# What it gives me: Prometheus (metrics), Alertmanager (alerts), Grafana
+# (dashboards), kube-state-metrics and node-exporter (cluster/node metrics).
+
+# ---------------------------------------------------------------------------
+# EKS runs the Kubernetes control plane for me, so etcd, the scheduler and the
+# controller manager can't be scraped, and kube-proxy only listens on
+# localhost. Left on, they show up as "down" targets and fire false alerts.
+# ---------------------------------------------------------------------------
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+windowsMonitoring:
+  enabled: false
+
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    kubeProxy: false
+    windows: false
+
+prometheus:
+  prometheusSpec:
+    # By default the operator only picks up ServiceMonitors/rules that carry
+    # this Helm release's label. "false" = pick up every ServiceMonitor,
+    # PodMonitor and PrometheusRule in the cluster, so my own files in
+    # observability/ don't need a special label.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    # 7 days, the same window as the SLO
+    retention: 7d
+    retentionSize: 4GB
+
+    # keep metrics on an EBS disk so a Prometheus restart doesn't lose them
+    # (they are still lost when the whole cluster is destroyed)
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 5Gi
+
+    resources:
+      requests:
+        cpu: 200m
+        memory: 600Mi
+      limits:
+        memory: 1500Mi
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 20m
+        memory: 50Mi
+      limits:
+        memory: 128Mi
+
+grafana:
+  # the admin password lives in a Kubernetes Secret that install-monitoring.sh
+  # creates with a random value, so the chart's well-known default password
+  # ("prom-operator") is never used
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  # Grafana is reached with "kubectl port-forward", not exposed to the internet
+  service:
+    type: ClusterIP
+
+  # dashboards are loaded from ConfigMaps labelled grafana_dashboard: "1"
+  # (in any namespace) - that is how my dashboard-as-code gets in
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 384Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      memory: 192Mi
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 96Mi

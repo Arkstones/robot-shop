@@ -1,5 +1,6 @@
 # Checks for the Capstone 2 setup: the Helm chart renders with my EKS values,
-# and the scripts pass ShellCheck. Robot Shop itself runs from the published
+# the monitoring config renders, the dashboard JSON is up to date, and the
+# scripts pass ShellCheck. Robot Shop itself runs from the published
 # images (robotshop/rs-*:2.1.0), so nothing is built here.
 
 name: CI
@@ -31,12 +32,39 @@ jobs:
       - name: helm template (render every manifest)
         run: helm template robot-shop K8s/helm -n robot-shop -f K8s/helm/values-eks.yaml > /dev/null
 
+      # looks for real Instana settings (agent/EUM variables, Instana servers,
+      # the tracing library), not just the word, which appears in comments
       - name: No Instana agent settings left in the chart
         run: |
-          if helm template robot-shop K8s/helm -f K8s/helm/values-eks.yaml | grep -i instana; then
+          if helm template robot-shop K8s/helm -f K8s/helm/values-eks.yaml \
+               | grep -v '^[[:space:]]*#' | grep -iE 'INSTANA_|instana\.io|libinstana|opentracing_'; then
             echo "::error::Instana settings found in the rendered chart"
             exit 1
           fi
 
       - name: ShellCheck
         run: shellcheck -S warning scripts/*.sh
+
+  observability:
+    name: Check monitoring config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      - name: kube-prometheus-stack renders with my values
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm template monitoring prometheus-community/kube-prometheus-stack \
+            --version 92.14.1 -n monitoring \
+            -f observability/kube-prometheus-stack-values.yaml > /dev/null
+
+      # the JSON is generated from build_dashboard.py; fail if someone edited
+      # one without regenerating the other
+      - name: Dashboard JSON matches build_dashboard.py
+        run: |
+          python3 observability/dashboards/build_dashboard.py
+          git diff --exit-code observability/dashboards/robot-shop-red.json

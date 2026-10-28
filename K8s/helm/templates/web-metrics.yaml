@@ -1,0 +1,74 @@
+{{- if .Values.web.metrics.enabled }}
+# Request / error / latency metrics for everything that passes through the
+# web gateway (nginx). nginx sends every access log line over syslog to the
+# nginx-log-exporter sidecar, which turns them into Prometheus metrics:
+#   nginx_http_response_count_total{service, method, status}
+#   nginx_http_response_time_seconds_hist_bucket{service, le, ...}
+#   nginx_http_upstream_time_seconds_hist_bucket{service, le, ...}
+# "service" comes from the URL: /api/<service>/... -> <service>, anything
+# else (the HTML, JS and images nginx serves itself) -> web.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-nginx-config
+  labels:
+    service: web
+data:
+  # replaces the image's /etc/nginx/conf.d/default.conf.template
+  default.conf.template: |
+{{ .Files.Get "files/web-default.conf.template" | indent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-log-exporter-config
+  labels:
+    service: web
+data:
+  config.yml: |
+    listen:
+      port: 4040
+      address: "0.0.0.0"
+      metrics_endpoint: "/metrics"
+
+    namespaces:
+      - name: nginx
+        source:
+          syslog:
+            listen_address: "udp://127.0.0.1:5531"
+            format: "rfc3164"
+            tags: ["nginx"]
+        # must match "log_format timed" in files/web-default.conf.template exactly
+        format: "$remote_addr - $remote_user [$time_local] \"$request\" $status $body_bytes_sent \"$http_referer\" \"$http_user_agent\" \"$http_x_forwarded_for\" $request_time $upstream_response_time"
+        relabel_configs:
+          - target_label: service
+            from: request
+            # "POST //api/payment/pay/partner-57 HTTP/1.1" -> "//api/payment/pay/partner-57"
+            split: 2
+            separator: " "
+            matches:
+              - regexp: "^/*api/([a-z]+)/.*$"
+                replacement: "$1"
+              - regexp: "^.*$"
+                replacement: "web"
+        # latency buckets in seconds, from 5 ms to 5 s
+        histogram_buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]
+---
+# Prometheus scrapes the exporter through this Service. It is separate from
+# the public "web" LoadBalancer Service so the metrics are not on the internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-metrics
+  labels:
+    service: web
+    metrics: nginx-log-exporter
+spec:
+  type: ClusterIP
+  selector:
+    service: web
+  ports:
+    - name: metrics
+      port: 4040
+      targetPort: metrics
+{{- end }}

@@ -21,6 +21,11 @@ redis:
   # the example-voting-app repo)
   storageClassName: ""
 
+# request/error/latency metrics for Prometheus (Capstone 2, step 2)
+web:
+  metrics:
+    enabled: true
+
 # steady simulated traffic for the dashboards, logs, traces and SLO
 load:
   enabled: true
