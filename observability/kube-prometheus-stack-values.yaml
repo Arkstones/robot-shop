@@ -94,12 +94,15 @@ grafana:
       labelValue: "1"
       searchNamespace: ALL
 
+  # 384Mi was too little once Loki and the logs dashboard were added:
+  # Grafana was OOMKilled 4 times on 28 Oct (kubectl showed
+  # lastState.terminated.reason: OOMKilled)
   resources:
     requests:
       cpu: 50m
-      memory: 128Mi
+      memory: 256Mi
     limits:
-      memory: 384Mi
+      memory: 768Mi
 
 prometheusOperator:
   resources:
