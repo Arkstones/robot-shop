@@ -4,3 +4,4 @@
 vendor/
 Gopkg.lock
 observability/slo/checkout-slo-rules.plain.yaml
+__pycache__/

@@ -26,11 +26,13 @@ tests:
       - expr: slo:checkout_errors:ratio_rate1h
         eval_time: 90m
         exp_samples:
-          - value: 0.55
+          - labels: 'slo:checkout_errors:ratio_rate1h'
+            value: 0.55
       - expr: slo:checkout_error_budget:remaining7d
         eval_time: 90m
         exp_samples:
-          - value: -54
+          - labels: 'slo:checkout_error_budget:remaining7d'
+            value: -54
     alert_rule_test:
       - eval_time: 90m
         alertname: CheckoutErrorBudgetFastBurn
@@ -85,7 +87,8 @@ tests:
       - expr: slo:checkout_errors:ratio_rate1h
         eval_time: 90m
         exp_samples:
-          - value: 0
+          - labels: 'slo:checkout_errors:ratio_rate1h'
+            value: 0
     alert_rule_test:
       - eval_time: 90m
         alertname: CheckoutErrorBudgetFastBurn
