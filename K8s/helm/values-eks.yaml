@@ -30,7 +30,7 @@ web:
 # payment/ from .github/workflows/payment-image.yml. Bump the tag together
 # with PAYMENT_VERSION in that workflow.
 payment:
-  image: ghcr.io/arkstones/rs-payment:2.1.0-otel.1
+  image: ghcr.io/arkstones/rs-payment:2.1.0-otel.2
   tracing:
     enabled: true
   # Python 3.12 + gunicorn + OpenTelemetry needs more than the stock 100Mi
