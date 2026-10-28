@@ -50,6 +50,33 @@ else
 fi
 
 echo
+echo "== Slack webhook for alerts =="
+# Alertmanager reads the webhook URL from this Secret (see alertmanager: in
+# kube-prometheus-stack-values.yaml). The URL is a password: anyone who has
+# it can post to the channel, so it is typed in here and never stored in Git
+# or in shell history. To change it later:
+#   kubectl delete secret alertmanager-slack -n monitoring && ./scripts/install-monitoring.sh
+if kubectl get secret alertmanager-slack -n "$NS" >/dev/null 2>&1; then
+    echo "secret alertmanager-slack already exists, keeping it"
+else
+    webhook="${SLACK_WEBHOOK_URL:-}"
+    if [[ -z "$webhook" && -t 0 ]]; then
+        read -rsp "Paste the Slack incoming-webhook URL (input hidden, Enter to skip): " webhook
+        echo
+    fi
+    if [[ "$webhook" != https://hooks.slack.com/* ]]; then
+        echo "WARNING: no valid Slack webhook given; alerts will fire but not reach Slack."
+        echo "         Re-run this script after deleting the secret to add one."
+        webhook="https://hooks.slack.com/services/NOT/CONFIGURED/YET"
+    fi
+    kubectl create secret generic alertmanager-slack -n "$NS" \
+        --from-literal=webhook-url="$webhook" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    unset webhook
+    echo "created secret alertmanager-slack"
+fi
+
+echo
 echo "== kube-prometheus-stack $CHART_VERSION =="
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts >/dev/null 2>&1 || true
 helm repo update prometheus-community >/dev/null
@@ -62,6 +89,11 @@ helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
 echo
 echo "== what Prometheus scrapes in robot-shop =="
 kubectl apply -f "$ROOT_DIR/observability/servicemonitors.yaml"
+
+echo
+echo "== checkout SLO: recording rules and burn-rate alerts =="
+# docs/slo/checkout.md explains the numbers
+kubectl apply -f "$ROOT_DIR/observability/slo/checkout-slo-rules.yaml"
 
 echo
 echo "== dashboard (dashboard as code) =="

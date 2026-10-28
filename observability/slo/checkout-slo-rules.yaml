@@ -1,0 +1,151 @@
+# Checkout SLO: recording rules and burn-rate alerts.
+# Written up in docs/slo/checkout.md; the alerts link to docs/runbooks/checkout-slo.md.
+# Applied by scripts/install-slo.sh. Tested by checkout-slo-rules.test.yaml (CI).
+#
+#   Availability: 99% of checkouts succeed (anything but 5xx), over 7 days
+#   Latency:      95% of checkouts finish in under 1 second, over 7 days
+#
+# A "checkout" = POST /api/payment/pay/<user> at the web gateway, which is
+# every POST the gateway sends to payment.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: checkout-slo
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/part-of: robot-shop
+spec:
+  groups:
+    # ---------------------------------------------------------------------
+    # The SLIs over several windows, worked out once a minute, so alerts and
+    # the dashboard read one ready number instead of re-adding 7 days of data.
+    #   errors ratio = 5xx checkouts / all checkouts
+    #   slow ratio   = checkouts slower than 1 s / all checkouts
+    #                  (histogram bucket le="1" counts the ones at or under 1 s)
+    # ---------------------------------------------------------------------
+    - name: checkout-slo-sli
+      interval: 1m
+      rules:
+        - record: slo:checkout_errors:ratio_rate5m
+          expr: |
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[5m]))
+            /
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[5m]))
+        - record: slo:checkout_errors:ratio_rate30m
+          expr: |
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[30m]))
+            /
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[30m]))
+        - record: slo:checkout_errors:ratio_rate1h
+          expr: |
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[1h]))
+            /
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[1h]))
+        - record: slo:checkout_errors:ratio_rate6h
+          expr: |
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[6h]))
+            /
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[6h]))
+        - record: slo:checkout_errors:ratio_rate7d
+          expr: |
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[7d]))
+            /
+            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[7d]))
+
+        - record: slo:checkout_slow:ratio_rate5m
+          expr: |
+            1 - (
+              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}[5m]))
+              /
+              sum(rate(nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}[5m]))
+            )
+        - record: slo:checkout_slow:ratio_rate1h
+          expr: |
+            1 - (
+              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}[1h]))
+              /
+              sum(rate(nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}[1h]))
+            )
+        - record: slo:checkout_slow:ratio_rate7d
+          expr: |
+            1 - (
+              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}[7d]))
+              /
+              sum(rate(nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}[7d]))
+            )
+
+        # how much of the week's error budget is left: 1 = untouched,
+        # 0 = all used, below 0 = overspent (the SLO is broken)
+        - record: slo:checkout_error_budget:remaining7d
+          expr: 1 - (slo:checkout_errors:ratio_rate7d / 0.01)
+
+    # ---------------------------------------------------------------------
+    # Burn-rate alerts (the "multiwindow, multi-burn-rate" method from
+    # Google's SRE Workbook, ch. 5).
+    #
+    # Burn rate = how fast the budget is being spent. 1x spends exactly the
+    # week's budget in a week. With a 1% budget:
+    #   14.4x over 1h -> 8.6% of the week's budget gone in that hour;
+    #                    all of it in ~12 hours. Someone should look now.
+    #    6x   over 6h -> 21% gone in 6 hours; all of it in ~28 hours.
+    #                    Look today.
+    # Each alert also checks a short window (5m / 30m) so it stops firing
+    # soon after the problem is fixed, instead of waiting an hour.
+    # ---------------------------------------------------------------------
+    - name: checkout-slo-alerts
+      rules:
+        - alert: CheckoutErrorBudgetFastBurn
+          expr: |
+            (slo:checkout_errors:ratio_rate1h / 0.01) > 14.4
+            and
+            (slo:checkout_errors:ratio_rate5m / 0.01) > 14.4
+          for: 2m
+          labels:
+            severity: critical
+            slo: checkout
+          annotations:
+            summary: "Checkout is failing: error budget burning {{ $value | humanize }}x too fast"
+            description: >-
+              {{ $value | humanize }}x burn rate over the last hour (1x would use exactly
+              a week's budget in a week). At this rate the 99% checkout SLO's
+              weekly error budget is gone in under 12 hours.
+              Check the Requests/Errors/Latency dashboard, then payment's error logs
+              and traces as the runbook describes.
+            runbook_url: https://github.com/Arkstones/robot-shop/blob/master/docs/runbooks/checkout-slo.md
+            dashboard: "Grafana > Dashboards > Robot Shop - Requests, Errors, Latency"
+
+        - alert: CheckoutErrorBudgetSlowBurn
+          expr: |
+            (slo:checkout_errors:ratio_rate6h / 0.01) > 6
+            and
+            (slo:checkout_errors:ratio_rate30m / 0.01) > 6
+          for: 15m
+          labels:
+            severity: warning
+            slo: checkout
+          annotations:
+            summary: "Checkout errors are slowly eating the error budget ({{ $value | humanize }}x)"
+            description: >-
+              {{ $value | humanize }}x burn rate over the last 6 hours. Not an emergency,
+              but at this rate the week's budget runs out in about a day. Look today.
+            runbook_url: https://github.com/Arkstones/robot-shop/blob/master/docs/runbooks/checkout-slo.md
+            dashboard: "Grafana > Dashboards > Robot Shop - Requests, Errors, Latency"
+
+        # latency budget is 5% of checkouts allowed over 1 s
+        - alert: CheckoutLatencyBudgetFastBurn
+          expr: |
+            (slo:checkout_slow:ratio_rate1h / 0.05) > 6
+            and
+            (slo:checkout_slow:ratio_rate5m / 0.05) > 6
+          for: 5m
+          labels:
+            severity: warning
+            slo: checkout
+          annotations:
+            summary: "Checkouts are slow: latency budget burning {{ $value | humanize }}x too fast"
+            description: >-
+              More than 30% of checkouts in the last hour took over 1 second
+              (the SLO allows 5%). Most checkout time is the call to the outside
+              payment gateway; open a slow trace in Jaeger to see which call it is.
+            runbook_url: https://github.com/Arkstones/robot-shop/blob/master/docs/runbooks/checkout-slo.md#checkouts-are-slow
+            dashboard: "Grafana > Dashboards > Robot Shop - Requests, Errors, Latency"
