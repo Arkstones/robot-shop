@@ -19,6 +19,12 @@ spec:
     - port: metrics
       path: /metrics
       interval: 15s
+      # The exporter sets its own "service" label (web, cart, payment...).
+      # Prometheus also adds service="web-metrics" (the Kubernetes Service it
+      # scraped), and by default its own label wins and mine gets renamed to
+      # exported_service - which left every dashboard panel empty.
+      # honorLabels keeps the exporter's value.
+      honorLabels: true
 ---
 # cart and payment have their own /metrics (business numbers:
 # items added to carts, items sold, cart value)
