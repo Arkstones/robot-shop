@@ -20,56 +20,59 @@ spec:
     # The SLIs over several windows, worked out once a minute, so alerts and
     # the dashboard read one ready number instead of re-adding 7 days of data.
     #   errors ratio = 5xx checkouts / all checkouts
+    #                  ("or vector(0)": a window with no 5xx at all is 0%
+    #                  errors, not "no data")
     #   slow ratio   = checkouts slower than 1 s / all checkouts
-    #                  (histogram bucket le="1" counts the ones at or under 1 s)
+    #                  (histogram bucket le="1" counts the ones at or under 1 s;
+    #                  Prometheus 3 writes it as le="1.0", older versions as "1")
     # ---------------------------------------------------------------------
     - name: checkout-slo-sli
       interval: 1m
       rules:
         - record: slo:checkout_errors:ratio_rate5m
           expr: |
-            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[5m]))
+            (sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[5m])) or vector(0))
             /
             sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[5m]))
         - record: slo:checkout_errors:ratio_rate30m
           expr: |
-            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[30m]))
+            (sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[30m])) or vector(0))
             /
             sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[30m]))
         - record: slo:checkout_errors:ratio_rate1h
           expr: |
-            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[1h]))
+            (sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[1h])) or vector(0))
             /
             sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[1h]))
         - record: slo:checkout_errors:ratio_rate6h
           expr: |
-            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[6h]))
+            (sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[6h])) or vector(0))
             /
             sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[6h]))
         - record: slo:checkout_errors:ratio_rate7d
           expr: |
-            sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[7d]))
+            (sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status=~"5.."}[7d])) or vector(0))
             /
             sum(rate(nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST"}[7d]))
 
         - record: slo:checkout_slow:ratio_rate5m
           expr: |
             1 - (
-              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}[5m]))
+              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le=~"1|1.0"}[5m]))
               /
               sum(rate(nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}[5m]))
             )
         - record: slo:checkout_slow:ratio_rate1h
           expr: |
             1 - (
-              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}[1h]))
+              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le=~"1|1.0"}[1h]))
               /
               sum(rate(nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}[1h]))
             )
         - record: slo:checkout_slow:ratio_rate7d
           expr: |
             1 - (
-              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}[7d]))
+              sum(rate(nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le=~"1|1.0"}[7d]))
               /
               sum(rate(nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}[7d]))
             )
