@@ -32,9 +32,12 @@ jobs:
       - name: helm template (render every manifest)
         run: helm template robot-shop K8s/helm -n robot-shop -f K8s/helm/values-eks.yaml > /dev/null
 
+      # looks for real Instana settings (agent/EUM variables, Instana servers,
+      # the tracing library), not just the word, which appears in comments
       - name: No Instana agent settings left in the chart
         run: |
-          if helm template robot-shop K8s/helm -f K8s/helm/values-eks.yaml | grep -i instana; then
+          if helm template robot-shop K8s/helm -f K8s/helm/values-eks.yaml \
+               | grep -v '^[[:space:]]*#' | grep -iE 'INSTANA_|instana\.io|libinstana|opentracing_'; then
             echo "::error::Instana settings found in the rendered chart"
             exit 1
           fi
