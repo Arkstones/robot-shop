@@ -88,7 +88,10 @@ panels = [
           "Business view, from payment's own /metrics: robots sold in the last hour.",
           [('sum(increase({__name__=~"sold_count|sold_count_total", namespace="robot-shop"}[1h]))',
             "items")],
-          (18, 1, 6, 4), "short", decimals=0),
+          (18, 1, 6, 4), "short", decimals=0,
+          # a count of sales, not a health signal: one neutral colour
+          # (Grafana's default turns anything above 80 red)
+          thresholds=[(None, "blue")]),
 
     row("Requests (Rate)", 5),
     panel("timeseries", "Requests per second by service",
