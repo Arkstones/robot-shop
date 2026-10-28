@@ -13,21 +13,40 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 NS=monitoring
 CHART_VERSION=92.14.1
 
-for tool in kubectl helm openssl; do
+for tool in kubectl helm base64 head; do
     command -v "$tool" >/dev/null 2>&1 || { echo "ERROR: $tool is not installed"; exit 1; }
 done
 
 kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
 
 echo "== Grafana admin password =="
-# created once with a random value and never stored in Git; re-runs keep it
-if ! kubectl get secret grafana-admin -n "$NS" >/dev/null 2>&1; then
+# 24 random letters/digits straight from the kernel's random source
+# (no openssl needed, which can be broken on some machines)
+new_password() {
+    head -c 48 /dev/urandom | base64 | tr -d '/+=\n' | cut -c1-24
+}
+
+# created once and never stored in Git; re-runs keep it, unless it is
+# missing or empty (an earlier version of this script could save an empty one)
+current=$(kubectl get secret grafana-admin -n "$NS" -o jsonpath='{.data.admin-password}' 2>/dev/null || true)
+if [[ -n "$current" ]]; then
+    echo "secret grafana-admin already exists, keeping it"
+else
+    password=$(new_password)
+    if (( ${#password} < 20 )); then
+        echo "ERROR: could not generate a Grafana password" >&2
+        exit 1
+    fi
     kubectl create secret generic grafana-admin -n "$NS" \
         --from-literal=admin-user=admin \
-        --from-literal=admin-password="$(openssl rand -base64 18)"
+        --from-literal=admin-password="$password" \
+        --dry-run=client -o yaml | kubectl apply -f -
+    unset password
     echo "created secret grafana-admin"
-else
-    echo "secret grafana-admin already exists, keeping it"
+    # Grafana only reads the password when it starts
+    if kubectl get deploy monitoring-grafana -n "$NS" >/dev/null 2>&1; then
+        kubectl rollout restart deploy/monitoring-grafana -n "$NS"
+    fi
 fi
 
 echo
