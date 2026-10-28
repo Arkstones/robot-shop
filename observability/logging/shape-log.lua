@@ -31,6 +31,9 @@ local PINO_NUMBERS = {
 -- MongoDB writes one letter in "s"
 local MONGO_LETTERS = { F = "error", E = "error", W = "warn", I = "info" }
 
+-- Redis: . debug, - verbose, * notice, # warning
+local REDIS_SYMBOLS = { ["."] = "debug", ["-"] = "debug", ["*"] = "info", ["#"] = "warn" }
+
 local function from_http_status(code)
   local n = tonumber(code)
   if not n then return nil end
@@ -75,6 +78,16 @@ local function level_of(line)
      or line:match('^[%w%.]+Exception') then
     return "error"
   end
+
+  -- 5. Redis marks the level with a symbol after the time:
+  --    "1:M 28 Oct 15:51:58.886 * DB saved on disk"
+  local symbol = line:match('^%d+:%u %d+ %a+ [%d:%.]+ ([%.%-%*#]) ')
+  if symbol then return REDIS_SYMBOLS[symbol] end
+
+  -- 6. Go's standard logger (dispatch) prints no level at all, only
+  --    "2026/10/28 15:56:14 message". A line it printed that reached this
+  --    point has no warning or error word in it, so it is ordinary output.
+  if line:match('^%d%d%d%d/%d%d/%d%d %d%d:%d%d:%d%d ') then return "info" end
 
   return "unknown"
 end
