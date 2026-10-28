@@ -1,0 +1,113 @@
+# Unit tests for the checkout SLO rules, run by CI:
+#
+#   promtool test rules observability/slo/checkout-slo-rules.test.yaml
+#
+# (rule_files points at the plain rules file CI pulls out of the
+# PrometheusRule's "spec", because promtool doesn't read Kubernetes objects.)
+#
+# Fake traffic: 60 checkouts a minute (1 per second).
+
+rule_files:
+  - checkout-slo-rules.plain.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. Today's real situation (measured 28 Oct 2026: 298 of 546 checkouts
+  #    failed). 55% failures = 55x burn rate: both error alerts must fire.
+  - name: "55% of checkouts failing -> fast and slow burn alerts"
+    interval: 1m
+    input_series:
+      - series: 'nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status="200"}'
+        values: '0+27x120'
+      - series: 'nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status="500"}'
+        values: '0+33x120'
+    promql_expr_test:
+      - expr: slo:checkout_errors:ratio_rate1h
+        eval_time: 90m
+        exp_samples:
+          - value: 0.55
+      - expr: slo:checkout_error_budget:remaining7d
+        eval_time: 90m
+        exp_samples:
+          - value: -54
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CheckoutErrorBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              slo: checkout
+            exp_annotations:
+              summary: "Checkout is failing: error budget burning 55x too fast"
+              description: "55x burn rate over the last hour (1x would use exactly a week's budget in a week). At this rate the 99% checkout SLO's weekly error budget is gone in under 12 hours. Check the Requests/Errors/Latency dashboard, then payment's error logs and traces as the runbook describes."
+              runbook_url: https://github.com/Arkstones/robot-shop/blob/master/docs/runbooks/checkout-slo.md
+              dashboard: "Grafana > Dashboards > Robot Shop - Requests, Errors, Latency"
+      - eval_time: 90m
+        alertname: CheckoutErrorBudgetSlowBurn
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              slo: checkout
+            exp_annotations:
+              summary: "Checkout errors are slowly eating the error budget (55x)"
+              description: "55x burn rate over the last 6 hours. Not an emergency, but at this rate the week's budget runs out in about a day. Look today."
+              runbook_url: https://github.com/Arkstones/robot-shop/blob/master/docs/runbooks/checkout-slo.md
+              dashboard: "Grafana > Dashboards > Robot Shop - Requests, Errors, Latency"
+
+  # 2. After the fix: 1 failure in 200 (0.5%) is inside the 1% budget.
+  #    No alerts.
+  - name: "0.5% failing -> within budget, no alerts"
+    interval: 1m
+    input_series:
+      - series: 'nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status="200"}'
+        values: '0+59.7x120'
+      - series: 'nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status="500"}'
+        values: '0+0.3x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CheckoutErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: CheckoutErrorBudgetSlowBurn
+        exp_alerts: []
+
+  # 3. 4xx answers are the customer's mistake, not ours: they don't count.
+  #    (This is why the payment fix returns 400 for an empty cart.)
+  - name: "400s don't spend the error budget"
+    interval: 1m
+    input_series:
+      - series: 'nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status="200"}'
+        values: '0+27x120'
+      - series: 'nginx_http_response_count_total{namespace="robot-shop", service="payment", method="POST", status="400"}'
+        values: '0+33x120'
+    promql_expr_test:
+      - expr: slo:checkout_errors:ratio_rate1h
+        eval_time: 90m
+        exp_samples:
+          - value: 0
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CheckoutErrorBudgetFastBurn
+        exp_alerts: []
+
+  # 4. Latency: 40% of checkouts over 1 s (8x the 5% budget) -> latency alert.
+  - name: "40% of checkouts slower than 1 s -> latency alert"
+    interval: 1m
+    input_series:
+      - series: 'nginx_http_response_time_seconds_hist_bucket{namespace="robot-shop", service="payment", method="POST", le="1"}'
+        values: '0+36x120'
+      - series: 'nginx_http_response_time_seconds_hist_count{namespace="robot-shop", service="payment", method="POST"}'
+        values: '0+60x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: CheckoutLatencyBudgetFastBurn
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              slo: checkout
+            exp_annotations:
+              summary: "Checkouts are slow: latency budget burning 8x too fast"
+              description: "More than 30% of checkouts in the last hour took over 1 second (the SLO allows 5%). Most checkout time is the call to the outside payment gateway; open a slow trace in Jaeger to see which call it is."
+              runbook_url: https://github.com/Arkstones/robot-shop/blob/master/docs/runbooks/checkout-slo.md#checkouts-are-slow
+              dashboard: "Grafana > Dashboards > Robot Shop - Requests, Errors, Latency"

@@ -194,3 +194,60 @@ jobs:
           docker run --rm -v "$PWD/relay.yaml:/conf/relay.yaml:ro" \
             -e MY_POD_IP=0.0.0.0 "$image" validate --config=/conf/relay.yaml
           echo "collector config is valid"
+
+  slo:
+    name: Check SLO rules and alert routing
+    runs-on: ubuntu-latest
+    env:
+      # the versions kube-prometheus-stack 92.14.1 runs
+      PROMETHEUS_IMAGE: quay.io/prometheus/prometheus:v3.15.1
+      ALERTMANAGER_IMAGE: quay.io/prometheus/alertmanager:v0.34.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      # promtool reads plain rule files, not Kubernetes objects: take "spec"
+      - name: Pull the rules out of the PrometheusRule
+        run: |
+          python3 -c '
+          import yaml
+          rule = yaml.safe_load(open("observability/slo/checkout-slo-rules.yaml"))
+          yaml.safe_dump(rule["spec"], open("observability/slo/checkout-slo-rules.plain.yaml", "w"), sort_keys=False)
+          '
+
+      - name: promtool check rules
+        run: |
+          docker run --rm -v "$PWD/observability/slo:/slo:ro" --entrypoint promtool \
+            "$PROMETHEUS_IMAGE" check rules /slo/checkout-slo-rules.plain.yaml
+
+      # fake traffic: 55% failing must alert, 0.5% must not, 400s don't count,
+      # 40% slow must raise the latency alert
+      - name: promtool test rules
+        run: |
+          docker run --rm -v "$PWD/observability/slo:/slo:ro" -w /slo --entrypoint promtool \
+            "$PROMETHEUS_IMAGE" test rules checkout-slo-rules.test.yaml
+
+      - name: Alertmanager accepts the rendered config
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm template monitoring prometheus-community/kube-prometheus-stack \
+            --version 92.14.1 -n monitoring \
+            -f observability/kube-prometheus-stack-values.yaml > kps.yaml
+          python3 -c '
+          import yaml, base64
+          for doc in yaml.safe_load_all(open("kps.yaml")):
+              if doc and doc["kind"] == "Secret" and "alertmanager.yaml" in doc.get("data", {}):
+                  open("alertmanager.yaml", "wb").write(base64.b64decode(doc["data"]["alertmanager.yaml"]))
+          '
+          docker run --rm -v "$PWD/alertmanager.yaml:/am/alertmanager.yaml:ro" --entrypoint amtool \
+            "$ALERTMANAGER_IMAGE" check-config /am/alertmanager.yaml
+          # an SLO alert must reach Slack, the Watchdog heartbeat must not
+          docker run --rm -v "$PWD/alertmanager.yaml:/am/alertmanager.yaml:ro" --entrypoint amtool \
+            "$ALERTMANAGER_IMAGE" config routes test --config.file=/am/alertmanager.yaml \
+            --verify.receivers=slack alertname=CheckoutErrorBudgetFastBurn slo=checkout severity=critical
+          docker run --rm -v "$PWD/alertmanager.yaml:/am/alertmanager.yaml:ro" --entrypoint amtool \
+            "$ALERTMANAGER_IMAGE" config routes test --config.file=/am/alertmanager.yaml \
+            --verify.receivers=null alertname=Watchdog severity=none

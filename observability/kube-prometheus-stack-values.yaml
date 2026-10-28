@@ -64,7 +64,54 @@ prometheus:
         memory: 1500Mi
 
 alertmanager:
+  # Where alerts go (Capstone 2, step 5). The Slack webhook URL is a secret:
+  # it lives in the Kubernetes Secret "alertmanager-slack" (created by
+  # install-monitoring.sh, never in Git) and Alertmanager reads it from the
+  # file the Secret is mounted as.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "null"
+      group_by: [alertname, slo]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        # the chart's "is alerting working at all" heartbeat; always firing
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+        # my checkout SLO alerts (observability/slo/checkout-slo-rules.yaml)
+        - receiver: slack
+          matchers: ['slo = "checkout"']
+        # the chart's own critical cluster alerts (node down, pods crash-looping...)
+        - receiver: slack
+          matchers: ['severity = "critical"']
+    inhibit_rules:
+      # while the fast-burn alert is firing, the slow-burn one says nothing new
+      - source_matchers: ['alertname = "CheckoutErrorBudgetFastBurn"']
+        target_matchers: ['alertname = "CheckoutErrorBudgetSlowBurn"']
+        equal: [slo]
+    receivers:
+      - name: "null"
+      - name: slack
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/alertmanager-slack/webhook-url
+            send_resolved: true
+            title: >-
+              {{ if eq .Status "firing" }}:rotating_light: FIRING{{ else }}:white_check_mark: RESOLVED{{ end }}:
+              {{ .CommonLabels.alertname }}
+            text: |-
+              {{ range .Alerts }}*{{ .Annotations.summary }}*
+              {{ .Annotations.description }}
+              *Severity:* {{ .Labels.severity }}
+              *Runbook:* {{ .Annotations.runbook_url }}
+              *Dashboard:* {{ .Annotations.dashboard }}
+              {{ end }}
   alertmanagerSpec:
+    # mounted at /etc/alertmanager/secrets/alertmanager-slack/
+    secrets:
+      - alertmanager-slack
     resources:
       requests:
         cpu: 20m

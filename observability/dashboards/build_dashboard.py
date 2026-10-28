@@ -67,6 +67,38 @@ def quantile(q):
     return f"histogram_quantile({q}, sum by (service, le) (rate({LAT}{RANGE})))"
 
 
+# The checkout SLO (docs/slo/checkout.md). These read the recording rules in
+# observability/slo/checkout-slo-rules.yaml, so they ignore the Service box.
+SLO_TITLE = "Checkout SLO: 99% succeed, 95% under 1 s (7 days)"
+slo_panels = [
+    row(SLO_TITLE, 0),
+    panel("stat", "Checkouts succeeding (7 days)",
+          "Share of checkouts (POST /api/payment/pay) that did not fail with a 5xx, "
+          "over the last 7 days. The SLO is 99%.",
+          [("1 - slo:checkout_errors:ratio_rate7d", "success")],
+          (0, 1, 6, 4), "percentunit", decimals=2,
+          thresholds=[(None, "red"), (0.99, "green")]),
+    panel("stat", "Error budget left (7 days)",
+          "100% = no failures yet this week; 0% = the 1% allowance is used up; "
+          "below 0 = the SLO is broken. When it is used up, the error budget "
+          "policy in docs/slo/checkout.md applies.",
+          [("slo:checkout_error_budget:remaining7d", "budget left")],
+          (6, 1, 6, 4), "percentunit", decimals=0,
+          thresholds=[(None, "red"), (0, "orange"), (0.25, "green")]),
+    panel("stat", "Burn rate (last hour)",
+          "How fast the budget is being spent. 1x = exactly a week's budget in a week. "
+          "Over 14.4x for an hour pages (CheckoutErrorBudgetFastBurn).",
+          [("slo:checkout_errors:ratio_rate1h / 0.01", "burn rate")],
+          (12, 1, 6, 4), "none", decimals=1,
+          thresholds=[(None, "green"), (1, "orange"), (14.4, "red")]),
+    panel("stat", "Checkouts under 1 s (7 days)",
+          "Share of checkouts that finished within 1 second. The SLO is 95%.",
+          [("1 - slo:checkout_slow:ratio_rate7d", "fast")],
+          (18, 1, 6, 4), "percentunit", decimals=2,
+          thresholds=[(None, "red"), (0.95, "green")]),
+]
+SLO_HEIGHT = 5
+
 panels = [
     row("Right now (whole shop)", 0),
     panel("stat", "Requests / second",
@@ -130,6 +162,11 @@ panels = [
            for q, name in ((0.5, "p50"), (0.95, "p95"), (0.99, "p99"))],
           (12, 24, 12, 8), "s"),
 ]
+
+# the SLO row goes on top; push everything else down to make room
+for p in panels:
+    p["gridPos"]["y"] += SLO_HEIGHT
+panels = slo_panels + panels
 
 dashboard = {
     "uid": "robot-shop-red",

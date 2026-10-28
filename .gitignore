@@ -3,3 +3,4 @@
 *-private.*
 vendor/
 Gopkg.lock
+observability/slo/checkout-slo-rules.plain.yaml
