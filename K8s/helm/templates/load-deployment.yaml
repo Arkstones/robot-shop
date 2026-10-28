@@ -1,0 +1,44 @@
+{{- if .Values.load.enabled }}
+# load-gen: simulated shoppers (browse, add to cart, check out) so the
+# dashboards, logs and traces always have steady traffic to show.
+# Based on K8s/load-deployment.yaml, moved into the chart so it installs and
+# upgrades together with the shop.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load
+  labels:
+    service: load
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      service: load
+  template:
+    metadata:
+      labels:
+        service: load
+    spec:
+      containers:
+      - name: load
+        image: {{ .Values.image.repo }}/rs-load:{{ .Values.image.version }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        env:
+          - name: HOST
+            value: "http://web:8080/"
+          - name: NUM_CLIENTS
+            value: {{ .Values.load.clients | quote }}
+          - name: SILENT
+            value: "1"
+          # ERROR=1 makes some simulated shoppers hit broken pages on purpose,
+          # so the error panels and the SLO have something real to measure
+          - name: ERROR
+            value: {{ .Values.load.errors | ternary "1" "0" | quote }}
+        resources:
+          limits:
+            cpu: 200m
+            memory: 200Mi
+          requests:
+            cpu: 100m
+            memory: 100Mi
+{{- end }}

@@ -1,0 +1,42 @@
+# Checks for the Capstone 2 setup: the Helm chart renders with my EKS values,
+# and the scripts pass ShellCheck. Robot Shop itself runs from the published
+# images (robotshop/rs-*:2.1.0), so nothing is built here.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint chart and scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      - name: helm lint (chart + EKS values)
+        run: helm lint K8s/helm -f K8s/helm/values-eks.yaml
+
+      - name: helm template (render every manifest)
+        run: helm template robot-shop K8s/helm -n robot-shop -f K8s/helm/values-eks.yaml > /dev/null
+
+      - name: No Instana agent settings left in the chart
+        run: |
+          if helm template robot-shop K8s/helm -f K8s/helm/values-eks.yaml | grep -i instana; then
+            echo "::error::Instana settings found in the rendered chart"
+            exit 1
+          fi
+
+      - name: ShellCheck
+        run: shellcheck -S warning scripts/*.sh
