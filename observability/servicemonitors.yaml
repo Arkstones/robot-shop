@@ -1,0 +1,41 @@
+# Tell Prometheus what to scrape in the robot-shop namespace.
+# Applied by scripts/install-monitoring.sh after kube-prometheus-stack is
+# installed (the ServiceMonitor type only exists once it is).
+
+# web gateway: request counts, errors and latency for every service, from the
+# nginx-log-exporter sidecar (K8s/helm/templates/web-metrics.yaml)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: web-gateway
+  namespace: robot-shop
+  labels:
+    app.kubernetes.io/part-of: robot-shop
+spec:
+  selector:
+    matchLabels:
+      metrics: nginx-log-exporter
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+---
+# cart and payment have their own /metrics (business numbers:
+# items added to carts, items sold, cart value)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: shop-business
+  namespace: robot-shop
+  labels:
+    app.kubernetes.io/part-of: robot-shop
+spec:
+  selector:
+    matchExpressions:
+      - key: service
+        operator: In
+        values: [cart, payment]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
