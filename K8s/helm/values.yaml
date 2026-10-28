@@ -58,7 +58,9 @@ web:
   # request/error/latency metrics from the nginx access log, see templates/web-metrics.yaml
   metrics:
     enabled: false
-    exporterImage: ghcr.io/martin-helmich/prometheus-nginxlog-exporter/exporter:v1.11.0
+    # versioned images are published on quay.io by the project's release
+    # pipeline (ghcr.io only has an old, hand-pushed "v1" tag)
+    exporterImage: quay.io/martinhelmich/prometheus-nginxlog-exporter:v1.11.0
 
 # load generator (simulated shoppers), see templates/load-deployment.yaml
 load:

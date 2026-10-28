@@ -42,6 +42,22 @@ jobs:
             exit 1
           fi
 
+      # catches a wrong image name or tag before it reaches the cluster
+      # (a non-existent exporter tag once left web stuck in ImagePullBackOff)
+      - name: Every image in the chart exists
+        run: |
+          images=$(helm template robot-shop K8s/helm -f K8s/helm/values-eks.yaml \
+                     | awk '$1 == "image:" || $1 == "-" && $2 == "image:" {print $NF}' | tr -d '"' | sort -u)
+          failed=0
+          for image in $images; do
+            if docker manifest inspect "$image" > /dev/null 2>&1; then
+              echo "OK       $image"
+            else
+              echo "MISSING  $image"; failed=1
+            fi
+          done
+          exit $failed
+
       - name: ShellCheck
         run: shellcheck -S warning scripts/*.sh
 
