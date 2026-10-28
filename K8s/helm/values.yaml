@@ -41,6 +41,19 @@ payment:
   # Default is https://www.paypal.com
   gateway: null
   #gateway: https://www.worldpay.com
+  # full image name; empty = <image.repo>/rs-payment:<image.version>
+  image: ""
+  # OpenTelemetry tracing; needs an image with payment/tracing.py in it
+  tracing:
+    enabled: false
+    endpoint: http://otel-collector.tracing.svc.cluster.local:4318
+  resources:
+    limits:
+      cpu: 200m
+      memory: 100Mi
+    requests:
+      cpu: 100m
+      memory: 50Mi
 
 rabbitmq: {}
 

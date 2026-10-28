@@ -1,0 +1,28 @@
+# Adds Jaeger to Grafana as a data source. Applied by scripts/install-tracing.sh.
+# Loaded by the same Grafana sidecar as the Loki one (label grafana_datasource).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jaeger-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+    app.kubernetes.io/part-of: robot-shop
+data:
+  jaeger-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Jaeger
+        type: jaeger
+        # fixed uid: the Loki data source links trace IDs to it
+        uid: jaeger
+        access: proxy
+        url: http://jaeger.tracing.svc.cluster.local:16686
+        jsonData:
+          # from a span, jump to payment's log lines for the same trace
+          tracesToLogsV2:
+            datasourceUid: loki
+            spanStartTimeShift: "-5m"
+            spanEndTimeShift: "5m"
+            customQuery: true
+            query: '{namespace="robot-shop", service="payment"} |= "$${__trace.traceId}"'

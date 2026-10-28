@@ -26,6 +26,22 @@ web:
   metrics:
     enabled: true
 
+# payment traced with OpenTelemetry (Capstone 2, step 4): my own build of
+# payment/ from .github/workflows/payment-image.yml. Bump the tag together
+# with PAYMENT_VERSION in that workflow.
+payment:
+  image: ghcr.io/arkstones/rs-payment:2.1.0-otel.1
+  tracing:
+    enabled: true
+  # Python 3.12 + gunicorn + OpenTelemetry needs more than the stock 100Mi
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
 # steady simulated traffic for the dashboards, logs, traces and SLO
 load:
   enabled: true
