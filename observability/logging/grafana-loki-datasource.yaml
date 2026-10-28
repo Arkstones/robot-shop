@@ -1,0 +1,25 @@
+# Adds Loki to Grafana as a data source. Applied by scripts/install-logging.sh.
+#
+# Grafana's sidecar (from kube-prometheus-stack) watches the monitoring
+# namespace for ConfigMaps labelled grafana_datasource: "1" and loads them, so
+# nothing has to be clicked in the Grafana UI.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-datasource
+  namespace: monitoring
+  labels:
+    grafana_datasource: "1"
+    app.kubernetes.io/part-of: robot-shop
+data:
+  loki-datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        type: loki
+        # fixed uid so my logs dashboard can point at it
+        uid: loki
+        access: proxy
+        url: http://loki.logging.svc.cluster.local:3100
+        jsonData:
+          maxLines: 1000

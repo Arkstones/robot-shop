@@ -78,9 +78,72 @@ jobs:
             --version 92.14.1 -n monitoring \
             -f observability/kube-prometheus-stack-values.yaml > /dev/null
 
-      # the JSON is generated from build_dashboard.py; fail if someone edited
-      # one without regenerating the other
-      - name: Dashboard JSON matches build_dashboard.py
+      # the JSON files are generated from the build_*.py scripts; fail if
+      # someone edited one without regenerating the other
+      - name: Dashboard JSON matches the build scripts
         run: |
           python3 observability/dashboards/build_dashboard.py
-          git diff --exit-code observability/dashboards/robot-shop-red.json
+          python3 observability/dashboards/build_logs_dashboard.py
+          git diff --exit-code observability/dashboards/
+
+  logging:
+    name: Check logging config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      # Fluent Bit runs shape-log.lua with LuaJIT (Lua 5.1); test it with the
+      # same Lua version against example lines from every service
+      - name: shape-log.lua gives each line the right level
+        run: |
+          sudo apt-get install -y -qq luajit > /dev/null
+          luajit observability/logging/test_shape_log.lua
+
+      - name: Loki and Fluent Bit render with my values
+        run: |
+          helm repo add grafana-community https://grafana-community.github.io/helm-charts
+          helm repo add fluent https://fluent.github.io/helm-charts
+          versions() { grep -E '^(LOKI|FLUENT_BIT)_CHART_VERSION=' scripts/install-logging.sh | cut -d= -f2 | cut -d' ' -f1; }
+          read -r loki fluent_bit <<< "$(versions | xargs)"
+          {
+            helm template loki grafana-community/loki --version "$loki" -n logging \
+              -f observability/logging/loki-values.yaml
+            helm template fluent-bit fluent/fluent-bit --version "$fluent_bit" -n logging \
+              -f observability/logging/fluent-bit-values.yaml \
+              --set-file 'luaScripts.shape-log\.lua'=observability/logging/shape-log.lua
+          } > rendered.yaml
+          echo "Loki $loki, Fluent Bit $fluent_bit rendered: $(grep -c '^kind:' rendered.yaml) objects"
+
+      - name: Every logging image exists
+        run: |
+          images=$(awk '$1 == "image:" || $1 == "-" && $2 == "image:" {print $NF}' rendered.yaml | tr -d '"' | sort -u)
+          failed=0
+          for image in $images; do
+            if docker manifest inspect "$image" > /dev/null 2>&1; then
+              echo "OK       $image"
+            else
+              echo "MISSING  $image"; failed=1
+            fi
+          done
+          exit $failed
+
+      - name: Fluent Bit accepts my config
+        run: |
+          # pull the generated fluent-bit.conf out of the rendered ConfigMap
+          python3 - <<'PY'
+          import yaml, pathlib
+          for doc in yaml.safe_load_all(open("rendered.yaml")):
+              if doc and doc["kind"] == "ConfigMap" and doc["metadata"]["name"] == "fluent-bit":
+                  pathlib.Path("fb").mkdir(exist_ok=True)
+                  for name, text in doc["data"].items():
+                      pathlib.Path("fb", name).write_text(text)
+          PY
+          image=$(awk '$1 == "image:" && /fluent-bit/ {print $NF}' rendered.yaml | tr -d '"' | head -1)
+          # --dry-run parses the config and loads the Lua script without starting
+          docker run --rm -v "$PWD/fb:/fluent-bit/etc/conf:ro" \
+            -v "$PWD/observability/logging:/fluent-bit/scripts:ro" \
+            "$image" /fluent-bit/bin/fluent-bit --dry-run -c /fluent-bit/etc/conf/fluent-bit.conf
