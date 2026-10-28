@@ -61,7 +61,12 @@ spec:
             cpu: 20m
             memory: 32Mi
         securityContext:
+          # the quay.io image doesn't set a user (so it would run as root);
+          # 65532 is the unprivileged "nonroot" user the project's own
+          # Dockerfile uses. Ports 4040 and 5531 are above 1024, so no root needed.
           runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
           capabilities:
