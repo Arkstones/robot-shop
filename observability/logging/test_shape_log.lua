@@ -5,8 +5,8 @@
 --
 -- Each example is written in the format that service really uses (taken from
 -- its code and image: pino, Flask/uwsgi, Spring Boot, my nginx log_format...),
--- with the level I expect shape-log.lua to give it. Once Loki is running I
--- can swap these for real lines copied out of Grafana.
+-- with the level I expect shape-log.lua to give it. The lines further down
+-- are real ones copied out of Loki once it was running.
 
 dofile("observability/logging/shape-log.lua")
 
@@ -39,7 +39,22 @@ local examples = {
   { "mysql", '2026-10-28T14:02:11.123456Z 0 [System] [MY-010931] [Server] ready for connections', "info" },
   { "rabbitmq", '2026-10-28 14:02:11.123 [info] <0.273.0> Server startup complete', "info" },
   -- dispatch: Go's plain log.Printf, no level at all
-  { "dispatch", '2026/10/28 14:02:11 order {"orderid": "2f6d"}', "unknown" },
+  { "dispatch", '2026/10/28 14:02:11 order {"orderid": "2f6d"}', "info" },
+
+  -- Real lines copied from Loki on my cluster (28 Oct 2026), after the first
+  -- install showed dispatch "unknown", redis "unknown" and dispatch "error":
+  { "dispatch", '2026/10/28 15:56:14 Creating child span', "info" },
+  { "dispatch", '2026/10/28 15:56:14 Headers map[X-INSTANA-L:1 X-INSTANA-S:8a2c4a63f2308bd7 X-INSTANA-T:abf7471e70c3d615]', "info" },
+  -- the Instana tracer built into the dispatch image, looking for an agent
+  -- that doesn't exist: real errors, so they stay "error"
+  { "dispatch", '2026/10/28 15:56:11 instana: ERROR: sender not ready', "error" },
+  { "dispatch", '2026/10/28 15:56:07 instana: INFO: failed to send a request to http://169.254.1.1:42699/: Get "http://169.254.1.1:42699/": context deadline exceeded', "info" },
+  { "redis", '1:M 28 Oct 15:51:58.886 * Background saving terminated with success', "info" },
+  { "redis", '40:C 28 Oct 15:51:58.788 * DB saved on disk', "info" },
+  { "redis", '1:M 28 Oct 15:51:58.886 # WARNING overcommit_memory is set to 0!', "warn" },
+  { "rabbitmq", '2026-10-28 15:43:46.338 [error] <0.1092.0> closing AMQP connection <0.1092.0> (172.31.35.246:43504 -> 172.31.20.9:5672):', "error" },
+  -- ...whose second line arrives separately with nothing to go on
+  { "rabbitmq", 'missed heartbeats from client, timeout: 60s', "unknown" },
   -- Loki and Grafana themselves: logfmt
   { "loki", 'level=warn ts=2026-10-28T14:02:11Z caller=pool.go:42 msg="slow query"', "warn" },
 }
