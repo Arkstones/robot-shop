@@ -13,6 +13,11 @@ spec:
     metadata:
       labels:
         service: web
+      {{- if .Values.web.metrics.enabled }}
+      annotations:
+        # restart the pod when the nginx or exporter config changes
+        checksum/config: {{ include (print $.Template.BasePath "/web-metrics.yaml") . | sha256sum }}
+      {{- end }}
     spec:
       {{ if .Values.psp.enabled }}
       serviceAccountName: robot-shop
@@ -30,6 +35,48 @@ spec:
           requests:
             cpu: 100m
             memory: 50Mi
+        {{- if .Values.web.metrics.enabled }}
+        volumeMounts:
+          # my nginx template with the "timed" log format (see web-metrics.yaml)
+          - name: nginx-config
+            mountPath: /etc/nginx/conf.d/default.conf.template
+            subPath: default.conf.template
+      # sidecar: turns nginx access log lines into Prometheus metrics
+      - name: log-exporter
+        image: {{ .Values.web.metrics.exporterImage }}
+        args: ["-config-file", "/etc/exporter/config.yml"]
+        ports:
+        - name: metrics
+          containerPort: 4040
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: metrics
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 20m
+            memory: 32Mi
+        securityContext:
+          runAsNonRoot: true
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: exporter-config
+            mountPath: /etc/exporter
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: web-nginx-config
+        - name: exporter-config
+          configMap:
+            name: web-log-exporter-config
+        {{- end }}
       restartPolicy: Always
       {{- with .Values.web.affinity }}
       affinity:
