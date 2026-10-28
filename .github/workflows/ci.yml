@@ -147,3 +147,50 @@ jobs:
           docker run --rm -v "$PWD/fb:/fluent-bit/etc/conf:ro" \
             -v "$PWD/observability/logging:/fluent-bit/scripts:ro" \
             "$image" /fluent-bit/bin/fluent-bit --dry-run -c /fluent-bit/etc/conf/fluent-bit.conf
+
+  tracing:
+    name: Check tracing config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v4.3.1
+
+      - name: OpenTelemetry Collector renders with my values
+        run: |
+          helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+          version=$(grep -E '^COLLECTOR_CHART_VERSION=' scripts/install-tracing.sh | cut -d= -f2 | cut -d' ' -f1)
+          helm template otel-collector open-telemetry/opentelemetry-collector --version "$version" \
+            -n tracing -f observability/tracing/otel-collector-values.yaml > collector.yaml
+          cat observability/tracing/jaeger.yaml >> collector.yaml
+          echo "collector chart $version rendered"
+
+      - name: Every tracing image exists
+        run: |
+          images=$(awk '$1 == "image:" || $1 == "-" && $2 == "image:" {print $NF}' collector.yaml | tr -d '"' | sort -u)
+          failed=0
+          for image in $images; do
+            if docker manifest inspect "$image" > /dev/null 2>&1; then
+              echo "OK       $image"
+            else
+              echo "MISSING  $image"; failed=1
+            fi
+          done
+          exit $failed
+
+      # the collector checks its own config: unknown component names (they
+      # were renamed in 0.16x), wrong pipeline wiring...
+      - name: Collector accepts its config
+        run: |
+          python3 - <<'PY'
+          import yaml
+          for doc in yaml.safe_load_all(open("collector.yaml")):
+              if doc and doc["kind"] == "ConfigMap" and doc["metadata"]["name"] == "otel-collector":
+                  open("relay.yaml", "w").write(doc["data"]["relay"])
+          PY
+          image=$(awk '$1 == "image:" && /opentelemetry-collector/ {print $NF}' collector.yaml | tr -d '"' | head -1)
+          docker run --rm -v "$PWD/relay.yaml:/conf/relay.yaml:ro" \
+            -e MY_POD_IP=0.0.0.0 "$image" validate --config=/conf/relay.yaml
+          echo "collector config is valid"

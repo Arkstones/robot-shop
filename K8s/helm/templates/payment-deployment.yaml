@@ -22,22 +22,29 @@ spec:
       {{ end }}
       containers:
       - name: payment
-        image: {{ .Values.image.repo }}/rs-payment:{{ .Values.image.version }}
+        # payment.image (my OpenTelemetry build) when set, else the stock image
+        image: {{ .Values.payment.image | default (printf "%s/rs-payment:%s" .Values.image.repo .Values.image.version) }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         env:
           {{- if .Values.payment.gateway }}
           - name: PAYMENT_GATEWAY
             value: {{ .Values.payment.gateway }}
           {{- end }}
+          {{- if .Values.payment.tracing.enabled }}
+          # OpenTelemetry (payment/tracing.py reads these)
+          - name: OTEL_SDK_DISABLED
+            value: "false"
+          - name: OTEL_SERVICE_NAME
+            value: payment
+          - name: OTEL_EXPORTER_OTLP_ENDPOINT
+            value: {{ .Values.payment.tracing.endpoint | quote }}
+          - name: OTEL_RESOURCE_ATTRIBUTES
+            value: "service.namespace={{ .Release.Namespace }},deployment.environment.name=capstone"
+          {{- end }}
         ports:
         - containerPort: 8080
         resources:
-          limits:
-            cpu: 200m
-            memory: 100Mi
-          requests:
-            cpu: 100m
-            memory: 50Mi
+          {{- toYaml .Values.payment.resources | nindent 10 }}
       restartPolicy: Always
       {{- with .Values.payment.affinity }}
       affinity:

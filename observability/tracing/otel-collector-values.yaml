@@ -1,0 +1,65 @@
+# My settings for the OpenTelemetry Collector (chart
+# open-telemetry/opentelemetry-collector 0.178.0, collector 0.163).
+# Installed by scripts/install-tracing.sh.
+#
+#   payment --OTLP/HTTP :4318--> Collector --OTLP/gRPC :4317--> Jaeger
+#
+# Why a Collector in the middle instead of payment sending straight to
+# Jaeger: the app only knows "send traces to the collector". Where they go
+# next (Jaeger today, something else later), batching, and adding the
+# Kubernetes pod/namespace to each span are the collector's job, so changing
+# them never means rebuilding the app.
+
+mode: deployment
+replicaCount: 1
+fullnameOverride: otel-collector
+
+# the "k8s" distribution: the official build with the Kubernetes components
+image:
+  repository: otel/opentelemetry-collector-k8s
+
+# adds k8s.pod.name, k8s.namespace.name, k8s.deployment.name... to every span
+# (and the permissions to look them up)
+presets:
+  kubernetesAttributes:
+    enabled: true
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+# Component names are the current ones (collector 0.16x renamed "otlp" to
+# "otlp_grpc" and "k8sattributes" to "k8s_attributes").
+config:
+  exporters:
+    otlp_grpc/jaeger:
+      endpoint: jaeger.tracing.svc.cluster.local:4317
+      tls:
+        insecure: true     # inside the cluster only
+  # only OTLP comes in; the chart's Jaeger/Zipkin/Prometheus receivers are off
+  receivers:
+    jaeger: null
+    zipkin: null
+    prometheus: null
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [memory_limiter, k8s_attributes, batch]
+        exporters: [otlp_grpc/jaeger]
+      # this collector only handles traces (metrics: Prometheus, logs: Fluent Bit)
+      metrics: null
+      logs: null
+
+ports:
+  jaeger-compact:
+    enabled: false
+  jaeger-thrift:
+    enabled: false
+  jaeger-grpc:
+    enabled: false
+  zipkin:
+    enabled: false

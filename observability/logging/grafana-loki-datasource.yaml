@@ -23,3 +23,12 @@ data:
         url: http://loki.logging.svc.cluster.local:3100
         jsonData:
           maxLines: 1000
+          # payment writes trace_id=<32 hex> in its log lines (Step 4);
+          # this turns it into a "View trace in Jaeger" link in Grafana.
+          # $$ because Grafana reads a single $ as an environment variable.
+          derivedFields:
+            - name: TraceID
+              matcherRegex: "trace_id=([0-9a-f]{32})"
+              url: "$${__value.raw}"
+              datasourceUid: jaeger
+              urlDisplayLabel: View trace in Jaeger

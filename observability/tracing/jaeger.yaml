@@ -1,0 +1,85 @@
+# Jaeger 2.22: stores traces and shows them (UI on port 16686).
+# Applied by scripts/install-tracing.sh.
+#
+# One "all-in-one" pod with in-memory storage. Traces are lost when the pod
+# restarts, which is fine for showing one real trace on a course cluster; a
+# real setup would keep them in Elasticsearch, Cassandra or ClickHouse.
+# It's a plain Deployment rather than the Jaeger Helm chart because one pod
+# with three ports is easier to read as YAML than as chart values.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  namespace: tracing
+  labels:
+    app.kubernetes.io/name: jaeger
+    app.kubernetes.io/part-of: robot-shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jaeger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: jaeger
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: jaeger
+          image: jaegertracing/jaeger:2.22.0
+          # no config file: the image's built-in all-in-one config is used
+          # (OTLP in, memory storage, UI). The image sets
+          # JAEGER_LISTEN_HOST=0.0.0.0 so it listens on the pod's address.
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: ui
+              containerPort: 16686
+            - name: health
+              containerPort: 13133
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: health
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: health
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+            # memory storage keeps up to 100,000 traces; at this shop's
+            # load that's days of traffic, so the limit is the real cap
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  namespace: tracing
+  labels:
+    app.kubernetes.io/name: jaeger
+spec:
+  selector:
+    app.kubernetes.io/name: jaeger
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: ui
+      port: 16686
+      targetPort: ui
