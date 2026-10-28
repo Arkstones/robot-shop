@@ -153,4 +153,5 @@ helm rollback robot-shop <last good revision> -n robot-shop --wait
   and when it was fixed.
 - If the incident used more than 20% of the week's budget, or the budget is
   used up: blameless postmortem (`docs/postmortems/`), and the feature freeze
-  from the error budget policy applies.
+  from the error budget policy applies. Example:
+  [2026-10-28 checkout failing for empty carts](../postmortems/2026-10-28-checkout-empty-cart-500s.md).
