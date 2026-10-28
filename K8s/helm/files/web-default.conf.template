@@ -1,8 +1,10 @@
-# lines 1-3 are deleted by the image's entrypoint.sh when Instana tracing is
-# off (it runs: sed -i '1,3d'), so they must stay as throwaway comments.
+# Lines 1-3 must stay throwaway comments: the image's entrypoint.sh deletes
+# them (sed -i '1,3d') when it has no Instana tracer, where they used to hold
+# the Instana tracing directives. The published rs-web:2.1.0 image does ship
+# the tracer, but without those directives here it is loaded and never used.
 # ------------------------------------------------------------------------
 # My version of web/default.conf.template, mounted over the image's copy by
-# K8s/helm/templates/web-nginx-configmap.yaml. Same routes as the original,
+# K8s/helm/templates/web-metrics.yaml. Same routes as the original,
 # with one addition: an access log format that records how long each request
 # took, sent both to stdout (for Fluent Bit/Loki) and over syslog to the
 # nginx-log-exporter sidecar (for Prometheus).
