@@ -1,6 +1,5 @@
 import random
 
-import instana
 import os
 import sys
 import time
@@ -20,6 +19,10 @@ from prometheus_client import Counter, Histogram
 
 app = Flask(__name__)
 app.logger.setLevel(logging.INFO)
+
+# OpenTelemetry (replaces the Instana tracer this service used to load)
+import tracing
+tracing.setup(app)
 
 CART = os.getenv('CART_HOST', 'cart')
 USER = os.getenv('USER_HOST', 'user')
@@ -76,7 +79,7 @@ def pay(id):
             has_shipping = True
 
     if cart.get('total', 0) == 0 or has_shipping == False:
-        app.logger.warn('cart not valid')
+        app.logger.warning('cart not valid')
         return 'cart not valid', 400
 
     # dummy call to payment gateway, hope they dont object
