@@ -72,7 +72,14 @@ def pay(id):
         anonymous_user = False
 
     # check that the cart is valid
-    # this will blow up if the cart is not valid
+    # A cart with no "items" (or no body at all) used to crash the loop below
+    # with "'NoneType' object is not iterable" and a 500, which spent the
+    # checkout SLO's error budget on the client's mistake. It is a bad
+    # request: answer 400. (Incident 28 Oct 2026, docs/postmortems/)
+    if not cart or not cart.get('items'):
+        app.logger.warning('cart not valid: no items')
+        return 'cart not valid', 400
+
     has_shipping = False
     for item in cart.get('items'):
         if item.get('sku') == 'SHIP':
